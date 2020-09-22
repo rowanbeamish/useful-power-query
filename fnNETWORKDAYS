@@ -1,0 +1,47 @@
+// netWorkDays
+// fnNETWORKDAYS
+let
+    Source = let func =   
+(StartDate as date, EndDate as date, optional Holidays as list, optional StartOfWeek as number) =>
+let
+    // optional StartOfWeek, if empty the week will start on Monaday
+    startOfWeek = if StartOfWeek = null then 1 else StartOfWeek,
+    
+    // Providing for logic where EndDate is after StartDate
+    Start = List.Min({StartDate, EndDate}),
+    End = List.Max({StartDate, EndDate}),
+
+    // Switch sign if EndDate is before StartDate
+    Sign = if EndDate < StartDate then -1 else 1,
+
+    // Get list of dates between Start- and EndDate
+    ListOfDates = List.Dates(Start, Number.From(End - Start) + 1,#duration(1,0,0,0)),
+
+    // if the optional Holidays parameter is used: Keep only those dates in the list that don't occur in the list of Holidays;
+    // otherwise continue with previous table
+    DeleteHolidays = if Holidays = null then ListOfDates else List.Difference(ListOfDates, List.Transform(Holidays, Date.From )),
+
+    // Select only the first 5 days of the week 
+    // The 1 in the 2nd parameter of Date.DayOfWeek makes sure that Monday will be taken as first day of the week
+    DeleteWeekends = List.Select(DeleteHolidays, each Date.DayOfWeek(_, startOfWeek) < 5 ),
+
+    // Count the number of days (items in the list)
+    CountDays = List.Count(DeleteWeekends) * Sign
+in
+    CountDays ,
+documentation = [
+Documentation.Name =  " Date.Networkdays.pq ",
+Documentation.Description = " Returns the number of whole working days between StartDate and EndDate similar to the NETWORKDAYS-function in Excel. Working days exclude weekends and any dates identified in holidays. ",
+Documentation.LongDescription = " Returns the number of whole working days between StartDate and EndDate similar to the NETWORKDAYS-function in Excel. Working days exclude weekends and any dates identified in (optional) holidays. ",
+Documentation.Category = " Date ",
+Documentation.Source = " www.TheBIccountant.com https://wp.me/p6lgsG-2fA .   ",
+Documentation.Version = " 2.1 Catering for negative duration",
+Documentation.Author = " Imke Feldmann ",
+Documentation.Examples = {[Description =  "  ",
+Code = "  ",
+Result = "  "]}]
+  
+ in  
+  Value.ReplaceType(func, Value.ReplaceMetadata(Value.Type(func), documentation))
+in
+    Source
