@@ -1,0 +1,170 @@
+// FlattenHierarchy
+let 
+  fFlattenHierarchy = (
+    hierarchyTable as table
+    ,parentKeyColumnIdentifier as text
+    ,parentNameColumnIdentifier as text
+    ,childKeyColumnIdentifier as text
+    ,childNameColumnIdentifier as text
+  ) as table =>
+  let
+    #"Get Root Parents" = Table.Distinct(
+      Table.SelectColumns(
+        Table.NestedJoin(hierarchyTable
+          ,parentKeyColumnIdentifier
+          ,hierarchyTable
+          ,childKeyColumnIdentifier
+          ,"ROOT.PARENTS"
+          ,JoinKind.LeftAnti
+        )
+        ,{
+          parentKeyColumnIdentifier
+          ,parentNameColumnIdentifier
+        }
+      )
+    ),
+    #"Generate Hierarchy" = fGetNextHierarchyLevel(
+      #"Get Root Parents"
+      ,parentKeyColumnIdentifier
+      ,1
+    ),
+    fGetNextHierarchyLevel = (
+      parentsTable as table
+      ,nextParentKeyColumnIdentifier as text
+      ,hierarchyLevel as number
+    ) =>
+      let 
+        vNextParentKey = childKeyColumnIdentifier & Text.From(hierarchyLevel),
+        vNextParentName = childNameColumnIdentifier & Text.From(hierarchyLevel),
+        #"Left Join - hierarchyTable (Get Children)" = Table.NestedJoin(parentsTable
+          ,nextParentKeyColumnIdentifier
+          ,hierarchyTable
+          ,parentKeyColumnIdentifier
+          ,"NODE.CHILDREN"
+          ,JoinKind.LeftOuter
+        ),
+        #"Expand Column - NODE.CHILDREN" = Table.ExpandTableColumn(#"Left Join - hierarchyTable (Get Children)"
+          ,"NODE.CHILDREN"
+          ,{
+              childKeyColumnIdentifier
+              ,childNameColumnIdentifier
+          },{
+              vNextParentKey
+              ,vNextParentName
+          }
+        ),
+        #"Filter Rows - Parents with Children" = Table.SelectRows(#"Expand Column - NODE.CHILDREN"
+          ,each Record.Field(_,vNextParentKey) <> null 
+              and Record.Field(_,vNextParentKey) <> Record.Field(_,nextParentKeyColumnIdentifier)
+        ),
+        #"Generate Next Hierarchy Level" = if Table.IsEmpty(#"Filter Rows - Parents with Children")
+          then parentsTable 
+          else Table.Combine(
+            {
+              parentsTable
+              ,@fGetNextHierarchyLevel(
+                #"Filter Rows - Parents with Children"
+                ,vNextParentKey
+                ,hierarchyLevel + 1
+              )
+            }
+        )
+      in 
+        #"Generate Next Hierarchy Level",
+    #"Add Column - HierarchyPath" = Table.AddColumn(#"Generate Hierarchy",
+      "HierarchyPath"
+      ,each Text.Combine(
+        List.Transform(
+          Record.FieldValues(
+            Record.SelectFields(_,
+              List.Select(Table.ColumnNames(#"Generate Hierarchy")
+                ,each Text.StartsWith(_,childKeyColumnIdentifier) 
+                  or Text.StartsWith(_,parentKeyColumnIdentifier)
+              )
+            )
+          )
+          ,each Text.From(_)
+        )
+        ,"|"
+      )
+      ,type text
+    ),
+    #"Add Column - HierarchyNodeID" = Table.AddColumn(#"Add Column - HierarchyPath",
+      "HierarchyNodeID"
+      ,each List.Last(Text.Split([HierarchyPath],"|"))
+      ,type text
+    ),
+    #"Add Column - HierarchyLevel" = Table.AddColumn(#"Add Column - HierarchyNodeID",
+      "HierarchyLevel"
+      ,each List.Count(Text.Split([HierarchyPath],"|"))
+      ,Int64.Type
+    ),
+    #"Add Column - IsLeafLevel" = Table.AddColumn(#"Add Column - HierarchyLevel",
+      "IsLeafLevel"
+      ,each List.Contains(
+          List.Transform(
+            Table.Column(
+              Table.NestedJoin(hierarchyTable
+              ,childKeyColumnIdentifier
+              ,hierarchyTable
+              ,parentKeyColumnIdentifier
+              ,"LEAFLEVEL.CHILDREN"
+              ,JoinKind.LeftAnti
+              )
+              ,childKeyColumnIdentifier
+            )
+            ,each Text.From(_)
+          )
+        ,List.Last(Text.Split([HierarchyPath],"|"))
+      )
+      ,type logical
+    )
+  in
+    #"Add Column - IsLeafLevel",
+  //Documentation
+  fFlattenHierarchyType = type function (
+    hierarchyTable as (type table meta [
+      Documentation.FieldCaption = "Hierarchy"
+      ,Documentation.LongDescription = "A table containing a parent-child hierarchy"
+      ]
+    )
+    ,parentKeyColumnIdentifier as (type text meta [
+      Documentation.FieldCaption = "Parent Key Column Identifier"
+      ,Documentation.LongDescription = "The name of the column used to identify the key of the parent node in the hierarchy"
+      ,Documentation.SampleValues = { "ParentID" }
+      ]
+    )
+    ,parentNameColumnIdentifier as (type text meta [
+      Documentation.FieldCaption = "Parent Name Column Identifier"
+      ,Documentation.LongDescription = "The name of the column used to identify the name of the parent node in the hierarchy"
+      ,Documentation.SampleValues = { "ParentName" }
+      ]
+    )
+    ,childKeyColumnIdentifier as (type text meta [
+      Documentation.FieldCaption = "Child Key Column Identifier"
+      ,Documentation.LongDescription = "The name of the column used to identify the key of the child node in the hierarchy"
+      ,Documentation.SampleValues = { "ChildID" }
+      ]
+    )
+    ,childNameColumnIdentifier as (type text meta [
+      Documentation.FieldCaption = "Child Name Column Identifier"
+      ,Documentation.LongDescription = "The name of the column used to identify the name of the child node in the hierarchy"
+      ,Documentation.SampleValues = { "ChildName" }
+      ]
+    )
+  ) as list meta [
+    Documentation.Name = "fFlattenHierarchy"
+    ,Documentation.LongDescription = "Returns a flattened hierarchy table from a parent-child hierarchy table input."
+      & "The number of columns returned is based on the depth of the hierarchy. Each child node will be prefixed"
+      & "with the value specified for the childNameColumnIdentifier parameter"
+    ,Documentation.Examples = {
+      [
+      Description = "Returns a flattened hierarchy table from a parent-child hierarchy table"
+      ,Code = "fFlattenHierarchy(barksdaleOrganisation, ""ParentNodeID"", ""ParentNodeName"", ""ChildNodeID"", ""ChildNodeName"")"
+      ,Result = "{100,2,3,51,62,""Stringer"",""Shamrock"",""Slim Charles"",""Bodie"",""Pudding"",5,""100|2|3|51|62"",TRUE,62}"
+        & ",{100,2,3,51,""Stringer"",""Shamrock"",""Slim Charles"",""Bodie"",4,""100|2|3|51"",FALSE,51}"
+      ]
+    }
+  ]
+in
+  Value.ReplaceType(fFlattenHierarchy, fFlattenHierarchyType)
