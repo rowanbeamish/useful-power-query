@@ -1,4 +1,5 @@
 // FlattenHierarchy
+// URL: https://pivotalbi.com/dynamically-flatten-a-parent-child-hierarchy-using-power-query-m/
 let 
   fFlattenHierarchy = (
     hierarchyTable as table
